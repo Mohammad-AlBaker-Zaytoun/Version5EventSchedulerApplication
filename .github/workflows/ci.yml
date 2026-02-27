@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_FIREBASE_API_KEY: test_key
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: test-project.firebaseapp.com
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: test-project
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: test-project.appspot.com
+      NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '1234567890'
+      NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:testappid
+      FIREBASE_PROJECT_ID: test-project
+      FIREBASE_CLIENT_EMAIL: firebase-adminsdk@test-project.iam.gserviceaccount.com
+      FIREBASE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n"
+      GEMINI_API_KEY: test_gemini_key
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
