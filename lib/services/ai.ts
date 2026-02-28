@@ -4,17 +4,19 @@ import { GoogleGenAI } from '@google/genai';
 import { getServerEnv } from '@/lib/env';
 import {
   dashboardBusinessInsightSchema,
+  eventRecommendationInsightSchema,
   schedulingAssistantOutputSchema,
 } from '@/lib/schemas/ai';
 import type {
   AnalyticsOverview,
   ApiUserContext,
   DashboardBusinessInsight,
+  EventRecommendationInsight,
   SchedulingAssistantInsight,
 } from '@/lib/types';
 import { getAnalyticsOverview } from '@/lib/services/analytics';
 import { listVisibleEvents } from '@/lib/services/events';
-import { hasOverlap } from '@/lib/events/utils';
+import { hasOverlap, isUpcomingEvent } from '@/lib/events/utils';
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -356,6 +358,306 @@ export async function generateDashboardBusinessInsight(
 
     return {
       ...validated.data,
+      source: 'gemini',
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+type VisibleEventItem = Awaited<ReturnType<typeof listVisibleEvents>>['items'][number];
+
+type RecommendationCandidate = {
+  event: VisibleEventItem;
+  score: number;
+  action: EventRecommendationInsight['recommendedAction'];
+  reasons: string[];
+  whyNow: string;
+  overlapCount: number;
+  pendingCount: number;
+};
+
+function incrementCounter(counter: Map<string, number>, key?: string, amount = 1) {
+  if (!key) {
+    return;
+  }
+
+  counter.set(key, (counter.get(key) ?? 0) + amount);
+}
+
+function getTopSignals(counter: Map<string, number>) {
+  return [...counter.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function buildEventRecommendationFallback(visibleEvents: VisibleEventItem[]): EventRecommendationInsight {
+  const now = Date.now();
+  const upcomingEvents = visibleEvents.filter((event) => isUpcomingEvent(event));
+
+  if (upcomingEvents.length === 0) {
+    return {
+      headline: 'No upcoming event stands out yet',
+      reason:
+        'There are no upcoming visible events to recommend right now, so the best next step is to create a new session or wait for more invitations.',
+      whyNow: 'The recommendation engine only prioritizes upcoming events that the signed-in user can actually access.',
+      recommendedAction: 'review',
+      source: 'fallback',
+    };
+  }
+
+  const positiveLocations = new Map<string, number>();
+  const positiveOrganizers = new Map<string, number>();
+  const negativeLocations = new Map<string, number>();
+  const negativeOrganizers = new Map<string, number>();
+
+  for (const event of visibleEvents) {
+    if (event.viewerRsvpStatus === 'attending' || event.viewerRsvpStatus === 'maybe') {
+      incrementCounter(positiveLocations, event.location.toLowerCase());
+      incrementCounter(positiveOrganizers, event.organizerName.toLowerCase());
+    }
+
+    if (event.viewerRsvpStatus === 'declined') {
+      incrementCounter(negativeLocations, event.location.toLowerCase());
+      incrementCounter(negativeOrganizers, event.organizerName.toLowerCase());
+    }
+  }
+
+  const overlapMap = new Map<string, number>();
+  for (const event of upcomingEvents) {
+    overlapMap.set(
+      event.id,
+      upcomingEvents.filter((candidate) => candidate.id !== event.id && hasOverlap(event, candidate))
+        .length,
+    );
+  }
+
+  const candidates: RecommendationCandidate[] = upcomingEvents
+    .filter((event) => event.viewerRsvpStatus !== 'declined')
+    .map((event) => {
+      const overlapCount = overlapMap.get(event.id) ?? 0;
+      const pendingCount = event.invitationCounts.invited;
+      const maybeCount = event.invitationCounts.maybe;
+      const hoursUntilStart = Math.max(0, (new Date(event.startsAt).getTime() - now) / 3_600_000);
+      const soonBonus = hoursUntilStart <= 24 ? 16 : hoursUntilStart <= 72 ? 10 : hoursUntilStart <= 168 ? 5 : 1;
+      const locationPositive = positiveLocations.get(event.location.toLowerCase()) ?? 0;
+      const organizerPositive = positiveOrganizers.get(event.organizerName.toLowerCase()) ?? 0;
+      const locationNegative = negativeLocations.get(event.location.toLowerCase()) ?? 0;
+      const organizerNegative = negativeOrganizers.get(event.organizerName.toLowerCase()) ?? 0;
+
+      let score = soonBonus + locationPositive * 6 + organizerPositive * 5 - locationNegative * 4 - organizerNegative * 4;
+      let action: EventRecommendationInsight['recommendedAction'] = 'review';
+      const reasons: string[] = [];
+      let whyNow = 'This event is in the near-term window, so it is worth reviewing soon.';
+
+      if (event.isOrganizer) {
+        action = overlapCount > 0 || pendingCount > 0 ? 'host' : 'prepare';
+        score += 26 + pendingCount * 7 + maybeCount * 3 + overlapCount * 6;
+        reasons.push('You are the organizer, so your decisions directly affect attendance quality.');
+
+        if (pendingCount > 0) {
+          reasons.push(`${pendingCount} invitation${pendingCount === 1 ? '' : 's'} are still waiting for a reply.`);
+          whyNow = 'Unanswered invitations are still affecting attendance confidence for this hosted event.';
+        } else if (overlapCount > 0) {
+          reasons.push(`It overlaps with ${overlapCount} other visible upcoming event${overlapCount === 1 ? '' : 's'}.`);
+          whyNow = 'The overlap risk should be managed before the event gets closer.';
+        } else {
+          whyNow = 'This hosted event is approaching soon and is the most important one to prepare well.';
+        }
+      } else {
+        if (event.viewerRsvpStatus === 'invited') {
+          action = 'respond';
+          score += 38 + Math.max(0, 4 - overlapCount) * 2;
+          reasons.push('You have not responded to this invitation yet.');
+          whyNow = 'A pending RSVP is still open, so this is the cleanest next decision to make.';
+        } else if (event.viewerRsvpStatus === 'maybe') {
+          action = 'review';
+          score += 28 + Math.max(0, 3 - overlapCount) * 2;
+          reasons.push('You marked this as maybe, so it is a good candidate for a final decision.');
+          whyNow = 'A tentative RSVP has more value when it is clarified before the event gets closer.';
+        } else {
+          action = 'prepare';
+          score += 22;
+          reasons.push('You are already attending, so this is the next event to prepare for.');
+          whyNow = 'It is one of your closest confirmed commitments in the visible schedule.';
+        }
+
+        if (locationPositive > 0) {
+          reasons.push(`You have responded positively to similar events in ${event.location}.`);
+        }
+
+        if (organizerPositive > 0) {
+          reasons.push(`You usually engage well with invitations from ${event.organizerName}.`);
+        }
+
+        if (overlapCount > 0) {
+          reasons.push(`It currently overlaps with ${overlapCount} other visible event${overlapCount === 1 ? '' : 's'}.`);
+        }
+      }
+
+      return {
+        event,
+        score,
+        action,
+        reasons,
+        whyNow,
+        overlapCount,
+        pendingCount,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  const winner = candidates[0];
+
+  if (!winner) {
+    return {
+      headline: 'No clear event recommendation is available',
+      reason:
+        'The current visible event set does not produce a strong candidate yet, so the best step is to review your schedule manually.',
+      whyNow: 'There is not enough upcoming signal to confidently prioritize one event over the others.',
+      recommendedAction: 'review',
+      source: 'fallback',
+    };
+  }
+
+  const actionLabels: Record<EventRecommendationInsight['recommendedAction'], string> = {
+    respond: 'Respond to this invitation',
+    attend: 'Attend this event',
+    prepare: 'Prepare for this event',
+    host: 'Focus on hosting this event',
+    review: 'Review this event',
+  };
+
+  return {
+    headline: actionLabels[winner.action],
+    reason: winner.reasons.slice(0, 3).join(' '),
+    whyNow: winner.whyNow,
+    recommendedAction: winner.action,
+    eventId: winner.event.id,
+    eventTitle: winner.event.title,
+    startsAt: winner.event.startsAt,
+    location: winner.event.location,
+    source: 'fallback',
+  };
+}
+
+function buildEventRecommendationPrompt(
+  user: ApiUserContext,
+  visibleEvents: VisibleEventItem[],
+  fallback: EventRecommendationInsight,
+) {
+  const respondedEvents = visibleEvents.filter(
+    (event) => event.viewerRsvpStatus && event.viewerRsvpStatus !== 'invited',
+  );
+  const positiveLocations = new Map<string, number>();
+  const positiveOrganizers = new Map<string, number>();
+
+  for (const event of respondedEvents) {
+    if (event.viewerRsvpStatus === 'attending' || event.viewerRsvpStatus === 'maybe') {
+      incrementCounter(positiveLocations, event.location, 1);
+      incrementCounter(positiveOrganizers, event.organizerName, 1);
+    }
+  }
+
+  const candidateLines = visibleEvents
+    .filter((event) => isUpcomingEvent(event) && event.viewerRsvpStatus !== 'declined')
+    .map((event) => {
+      const overlaps = visibleEvents.filter(
+        (candidate) =>
+          candidate.id !== event.id && isUpcomingEvent(candidate) && hasOverlap(event, candidate),
+      ).length;
+
+      return `- id=${event.id} | title=${event.title} | startsAt=${event.startsAt} | location=${event.location} | organizer=${event.organizerName} | isOrganizer=${event.isOrganizer} | viewerRsvpStatus=${event.viewerRsvpStatus ?? 'none'} | invited=${event.invitationCounts.invited} | attending=${event.invitationCounts.attending} | maybe=${event.invitationCounts.maybe} | overlaps=${overlaps}`;
+    })
+    .join('\n');
+
+  return `You are an event recommendation assistant for the signed-in user.
+Choose one visible upcoming event to recommend next and explain why.
+Return strict JSON with keys:
+headline, reason, whyNow, recommendedAction, eventId, eventTitle, startsAt, location.
+
+Constraints:
+- recommendedAction one of respond, attend, prepare, host, review
+- reason max 500 chars
+- whyNow max 320 chars
+- pick only from the provided candidate ids
+- do not recommend declined events
+- no markdown
+
+Signed-in user:
+name=${user.displayName}
+email=${user.email}
+
+Positive response signals:
+locations=${getTopSignals(positiveLocations).map((item) => `${item.name} (${item.count})`).join(', ') || 'none'}
+organizers=${getTopSignals(positiveOrganizers).map((item) => `${item.name} (${item.count})`).join(', ') || 'none'}
+
+Candidate events:
+${candidateLines || '- none'}
+
+If unsure, stay close to this fallback:
+${JSON.stringify({
+    headline: fallback.headline,
+    reason: fallback.reason,
+    whyNow: fallback.whyNow,
+    recommendedAction: fallback.recommendedAction,
+    eventId: fallback.eventId,
+    eventTitle: fallback.eventTitle,
+    startsAt: fallback.startsAt,
+    location: fallback.location,
+  })}`;
+}
+
+export async function generateEventRecommendationInsight(
+  user: ApiUserContext,
+): Promise<EventRecommendationInsight> {
+  const response = await listVisibleEvents(user, {
+    page: 1,
+    limit: 100,
+    scope: 'all',
+  });
+
+  const visibleEvents = response.items;
+  const fallback = buildEventRecommendationFallback(visibleEvents);
+
+  if (!fallback.eventId) {
+    return fallback;
+  }
+
+  try {
+    const aiResponse = await getAiClient().models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: buildEventRecommendationPrompt(user, visibleEvents, fallback),
+      config: {
+        temperature: 0.35,
+        topP: 0.85,
+        responseMimeType: 'application/json',
+      },
+    });
+
+    const text = aiResponse.text?.trim();
+    if (!text) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(text) as unknown;
+    const validated = eventRecommendationInsightSchema.safeParse(parsed);
+
+    if (!validated.success) {
+      return fallback;
+    }
+
+    const matchedEvent = visibleEvents.find((event) => event.id === validated.data.eventId);
+    if (!matchedEvent) {
+      return fallback;
+    }
+
+    return {
+      ...validated.data,
+      eventTitle: matchedEvent.title,
+      startsAt: matchedEvent.startsAt,
+      location: matchedEvent.location,
       source: 'gemini',
     };
   } catch {

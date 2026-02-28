@@ -117,6 +117,18 @@ export interface DashboardBusinessInsight {
   source: 'gemini' | 'fallback';
 }
 
+export interface EventRecommendationInsight {
+  headline: string;
+  reason: string;
+  whyNow: string;
+  recommendedAction: 'respond' | 'attend' | 'prepare' | 'host' | 'review';
+  eventId?: string;
+  eventTitle?: string;
+  startsAt?: string;
+  location?: string;
+  source: 'gemini' | 'fallback';
+}
+
 export interface SchedulingAssistantInsight {
   summary: string;
   conflictLevel: 'low' | 'medium' | 'high';
