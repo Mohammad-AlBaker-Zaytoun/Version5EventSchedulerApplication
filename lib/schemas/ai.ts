@@ -31,3 +31,12 @@ export const schedulingAssistantOutputSchema = z.object({
   suggestedSummary: z.string().max(400).optional(),
   agendaBullets: z.array(z.string().min(3).max(140)).max(6).optional(),
 });
+
+export const dashboardBusinessInsightSchema = z.object({
+  headline: z.string().min(8).max(140),
+  summary: z.string().min(20).max(900),
+  health: z.enum(['strong', 'steady', 'watch']),
+  strengths: z.array(z.string().min(3).max(220)).min(1).max(4),
+  risks: z.array(z.string().min(3).max(220)).min(1).max(4),
+  recommendations: z.array(z.string().min(3).max(220)).min(2).max(4),
+});
