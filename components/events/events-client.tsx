@@ -5,11 +5,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { EventCard } from '@/components/events/event-card';
 import { EventForm, type EventFormValues } from '@/components/events/event-form';
+import { EventRecommendationPanel } from '@/components/events/event-recommendation-panel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { authFetch } from '@/lib/auth/client';
-import type { EventListResponse } from '@/lib/types';
+import type { EventListResponse, EventRecommendationInsight } from '@/lib/types';
 
 type Filters = {
   q: string;
@@ -43,6 +44,9 @@ export function EventsClient() {
   const [creating, setCreating] = useState(false);
   const [response, setResponse] = useState<EventListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recommendation, setRecommendation] = useState<EventRecommendationInsight | null>(null);
+  const [recommendationLoading, setRecommendationLoading] = useState(true);
+  const [recommendationError, setRecommendationError] = useState<string | null>(null);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -75,9 +79,40 @@ export function EventsClient() {
     }
   }, [queryString]);
 
+  const loadRecommendation = useCallback(async () => {
+    setRecommendationLoading(true);
+    setRecommendationError(null);
+
+    try {
+      const response = await authFetch('/api/ai/event-recommendation');
+      const payload = (await response.json()) as {
+        recommendation?: EventRecommendationInsight;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.recommendation) {
+        throw new Error(payload.error ?? 'Unable to generate an event recommendation.');
+      }
+
+      setRecommendation(payload.recommendation);
+    } catch (nextError) {
+      setRecommendationError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to generate an event recommendation.',
+      );
+    } finally {
+      setRecommendationLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
+
+  useEffect(() => {
+    void loadRecommendation();
+  }, [loadRecommendation]);
 
   async function createEvent(values: EventFormValues) {
     const response = await authFetch('/api/events', {
@@ -92,6 +127,7 @@ export function EventsClient() {
 
     setCreating(false);
     await loadEvents();
+    await loadRecommendation();
   }
 
   return (
@@ -173,6 +209,13 @@ export function EventsClient() {
           </div>
         </CardContent>
       </Card>
+
+      <EventRecommendationPanel
+        recommendation={recommendation}
+        loading={recommendationLoading}
+        error={recommendationError}
+        onRefresh={loadRecommendation}
+      />
 
       {creating ? (
         <Card>

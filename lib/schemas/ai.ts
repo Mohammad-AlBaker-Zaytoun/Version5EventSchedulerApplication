@@ -40,3 +40,14 @@ export const dashboardBusinessInsightSchema = z.object({
   risks: z.array(z.string().min(3).max(220)).min(1).max(4),
   recommendations: z.array(z.string().min(3).max(220)).min(2).max(4),
 });
+
+export const eventRecommendationInsightSchema = z.object({
+  headline: z.string().min(8).max(140),
+  reason: z.string().min(20).max(500),
+  whyNow: z.string().min(12).max(320),
+  recommendedAction: z.enum(['respond', 'attend', 'prepare', 'host', 'review']),
+  eventId: z.string().trim().optional(),
+  eventTitle: z.string().trim().max(160).optional(),
+  startsAt: z.string().datetime().optional(),
+  location: z.string().trim().max(160).optional(),
+});
