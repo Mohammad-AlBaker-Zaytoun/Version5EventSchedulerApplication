@@ -9,12 +9,13 @@ import {
   UserCheck,
   Users2,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { DashboardAiPanel } from '@/components/dashboard/dashboard-ai-panel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authFetch } from '@/lib/auth/client';
 import { clamp, cn } from '@/lib/utils';
-import type { AnalyticsOverview } from '@/lib/types';
+import type { AnalyticsOverview, DashboardBusinessInsight } from '@/lib/types';
 
 const RESPONSE_META = {
   pending: {
@@ -92,9 +93,39 @@ export function DashboardClient() {
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [aiInsight, setAiInsight] = useState<DashboardBusinessInsight | null>(null);
+  const [aiLoading, setAiLoading] = useState(true);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [animateIn, setAnimateIn] = useState(false);
   const [activeStatus, setActiveStatus] = useState<ResponseStatus>('attending');
   const [activeDayIndex, setActiveDayIndex] = useState(0);
+
+  const loadDashboardInsight = useCallback(async () => {
+    setAiLoading(true);
+    setAiError(null);
+
+    try {
+      const response = await authFetch('/api/ai/dashboard-insight');
+      const payload = (await response.json()) as {
+        insight?: DashboardBusinessInsight;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.insight) {
+        throw new Error(payload.error ?? 'Unable to generate dashboard advice right now.');
+      }
+
+      setAiInsight(payload.insight);
+    } catch (nextError) {
+      setAiError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to generate dashboard advice right now.',
+      );
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +167,10 @@ export function DashboardClient() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    void loadDashboardInsight();
+  }, [loadDashboardInsight]);
 
   useEffect(() => {
     if (!overview) {
@@ -220,6 +255,13 @@ export function DashboardClient() {
           </div>
         </div>
       </Card>
+
+      <DashboardAiPanel
+        insight={aiInsight}
+        loading={aiLoading}
+        error={aiError}
+        onRefresh={loadDashboardInsight}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[

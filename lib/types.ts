@@ -107,6 +107,16 @@ export interface AnalyticsOverview {
   recentActivity: EventActivityLog[];
 }
 
+export interface DashboardBusinessInsight {
+  headline: string;
+  summary: string;
+  health: 'strong' | 'steady' | 'watch';
+  strengths: string[];
+  risks: string[];
+  recommendations: string[];
+  source: 'gemini' | 'fallback';
+}
+
 export interface SchedulingAssistantInsight {
   summary: string;
   conflictLevel: 'low' | 'medium' | 'high';
