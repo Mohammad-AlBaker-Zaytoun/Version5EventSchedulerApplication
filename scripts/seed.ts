@@ -48,9 +48,9 @@ async function deleteCollection(name: (typeof COLLECTIONS)[number], dryRun: bool
   return deleted;
 }
 
-async function ensureAccessUser(email: string, dryRun: boolean): Promise<string> {
+async function getAccessUserProfile(email: string): Promise<UserProfile> {
   const authUser = await getAdminAuth().getUserByEmail(email);
-  const profile: UserProfile = {
+  return {
     uid: authUser.uid,
     email,
     normalizedEmail: normalizeEmail(email),
@@ -60,12 +60,6 @@ async function ensureAccessUser(email: string, dryRun: boolean): Promise<string>
     updatedAt: nowIso(),
     lastLoginAt: nowIso(),
   };
-
-  if (!dryRun) {
-    await getAdminDb().collection('users').doc(profile.uid).set(profile, { merge: true });
-  }
-
-  return profile.uid;
 }
 
 function buildSeedUsers(): UserProfile[] {
@@ -101,26 +95,49 @@ function buildSeedUsers(): UserProfile[] {
   ];
 }
 
-function buildSeedEvents(users: UserProfile[]): EventRecord[] {
-  const organizer = users[0];
+function mergeAccessUser(users: UserProfile[], accessProfile?: UserProfile): UserProfile[] {
+  if (!accessProfile) {
+    return users;
+  }
+
+  const next = [...users];
+  const existingIndex = next.findIndex(
+    (user) =>
+      user.uid === accessProfile.uid || user.normalizedEmail === accessProfile.normalizedEmail,
+  );
+
+  if (existingIndex >= 0) {
+    next[existingIndex] = accessProfile;
+    return next;
+  }
+
+  next.push(accessProfile);
+  return next;
+}
+
+function buildSeedEvents(users: UserProfile[], accessProfile?: UserProfile): EventRecord[] {
+  const primaryOrganizer = accessProfile ?? users[0];
+  const fallbackOrganizer = users.find((user) => user.uid !== primaryOrganizer.uid) ?? primaryOrganizer;
   const now = Date.now();
   const base = Array.from({ length: 8 }).map((_, index) => {
     const startsAt = new Date(now + (index + 1) * 86400000 + (index % 3) * 7200000);
     const endsAt = new Date(startsAt.getTime() + 5400000);
     const title = index % 2 === 0 ? `Design Sync ${index + 1}` : `Launch Planning ${index + 1}`;
     const description = `Structured planning session for ${title.toLowerCase()} with invited collaborators.`;
+    const organizer = accessProfile && index % 2 === 1 ? fallbackOrganizer : primaryOrganizer;
+    const location = index % 2 === 0 ? 'Lisbon Studio' : 'Remote Boardroom';
 
     return {
       id: `seed-event-${String(index + 1).padStart(3, '0')}`,
       title,
       description,
-      location: index % 2 === 0 ? 'Lisbon Studio' : 'Remote Boardroom',
+      location,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       timezone: 'UTC',
       organizerUid: organizer.uid,
       organizerName: organizer.displayName,
-      searchBlob: createEventSearchBlob({ title, description, location: index % 2 === 0 ? 'Lisbon Studio' : 'Remote Boardroom', timezone: 'UTC' }),
+      searchBlob: createEventSearchBlob({ title, description, location, timezone: 'UTC' }),
       aiSummary: `AI-ready briefing for ${title.toLowerCase()}.`,
       aiAgendaBullets: ['Opening context', 'Core discussion', 'Commitments'],
       invitationCounts: makeInvitationCounts(),
@@ -132,17 +149,58 @@ function buildSeedEvents(users: UserProfile[]): EventRecord[] {
   return base;
 }
 
-function buildSeedInvitations(events: EventRecord[], users: UserProfile[]): EventInvitation[] {
+function buildSeedInvitations(
+  events: EventRecord[],
+  users: UserProfile[],
+  accessProfile?: UserProfile,
+): EventInvitation[] {
   const now = nowIso();
-  const userOne = users[1];
-  const userTwo = users[2];
 
   return events.flatMap((event, index) => {
-    const statuses = index % 3 === 0 ? ['attending', 'maybe'] : index % 3 === 1 ? ['invited', 'declined'] : ['attending', 'invited'];
-    const invitees = [
-      { user: userOne, status: statuses[0] },
-      { user: userTwo, status: statuses[1] },
-    ];
+    const candidateInvitees = users.filter((user) => user.uid !== event.organizerUid);
+    const accessInvitee =
+      accessProfile && accessProfile.uid !== event.organizerUid ? accessProfile : undefined;
+    const alternateInvitees = candidateInvitees.filter(
+      (user) => !accessInvitee || user.uid !== accessInvitee.uid,
+    );
+
+    const primaryStatuses =
+      index % 3 === 0
+        ? ['attending', 'maybe']
+        : index % 3 === 1
+          ? ['invited', 'declined']
+          : ['attending', 'invited'];
+
+    const invitees: Array<{
+      user: UserProfile;
+      status: EventInvitation['rsvpStatus'];
+    }> = [];
+
+    if (accessInvitee) {
+      invitees.push({
+        user: accessInvitee,
+        status:
+          (index % 3 === 0
+            ? 'attending'
+            : index % 3 === 1
+              ? 'maybe'
+              : 'invited') as EventInvitation['rsvpStatus'],
+      });
+    }
+
+    if (alternateInvitees[0]) {
+      invitees.push({
+        user: alternateInvitees[0],
+        status: primaryStatuses[0] as EventInvitation['rsvpStatus'],
+      });
+    }
+
+    if (alternateInvitees[1]) {
+      invitees.push({
+        user: alternateInvitees[1],
+        status: primaryStatuses[1] as EventInvitation['rsvpStatus'],
+      });
+    }
 
     return invitees.map(({ user, status }, inviteIndex) => ({
       id: `${event.id}-invite-${inviteIndex + 1}`,
@@ -166,13 +224,12 @@ function buildSeedInvitations(events: EventRecord[], users: UserProfile[]): Even
   });
 }
 
-function buildSeedActivity(events: EventRecord[], users: UserProfile[]): EventActivityLog[] {
-  const organizer = users[0];
+function buildSeedActivity(events: EventRecord[]): EventActivityLog[] {
   return events.map((event, index) => ({
     id: `seed-activity-${String(index + 1).padStart(3, '0')}`,
     eventId: event.id,
-    actorUid: organizer.uid,
-    actorName: organizer.displayName,
+    actorUid: event.organizerUid,
+    actorName: event.organizerName,
     action: 'created',
     metadata: {
       title: event.title,
@@ -194,10 +251,11 @@ async function main() {
     deletedCounts[collection] = await deleteCollection(collection, args.dryRun);
   }
 
-  const users = buildSeedUsers();
-  const events = buildSeedEvents(users);
-  const invitations = buildSeedInvitations(events, users);
-  const activity = buildSeedActivity(events, users);
+  const accessProfile = args.accessEmail ? await getAccessUserProfile(args.accessEmail) : undefined;
+  const users = mergeAccessUser(buildSeedUsers(), accessProfile);
+  const events = buildSeedEvents(users, accessProfile);
+  const invitations = buildSeedInvitations(events, users, accessProfile);
+  const activity = buildSeedActivity(events);
 
   const countsByEvent = new Map<string, EventRecord['invitationCounts']>();
   for (const invitation of invitations) {
@@ -227,10 +285,7 @@ async function main() {
     await batch.commit();
   }
 
-  let accessUid: string | undefined;
-  if (args.accessEmail) {
-    accessUid = await ensureAccessUser(args.accessEmail, args.dryRun);
-  }
+  const accessUid = accessProfile?.uid;
 
   console.log(JSON.stringify({
     projectId,
