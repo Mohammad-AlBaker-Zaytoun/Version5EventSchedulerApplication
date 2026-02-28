@@ -58,10 +58,36 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
-    const Comp = asChild ? Slot : 'button';
+    const buttonContent = (contentChildren: React.ReactNode) => (
+      <>
+        {loading ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+        {loading && loadingText ? loadingText : contentChildren}
+      </>
+    );
+
+    if (asChild) {
+      const onlyChild = React.Children.only(children) as React.ReactElement<{
+        children?: React.ReactNode;
+      }>;
+
+      return (
+        <Slot
+          className={cn(buttonVariants({ variant, size, className }))}
+          ref={ref}
+          aria-busy={loading || undefined}
+          aria-disabled={disabled || loading || undefined}
+          data-loading={loading ? 'true' : undefined}
+          {...props}
+        >
+          {React.cloneElement(onlyChild, {
+            children: buttonContent(onlyChild.props.children),
+          })}
+        </Slot>
+      );
+    }
 
     return (
-      <Comp
+      <button
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         aria-busy={loading || undefined}
@@ -69,9 +95,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || loading}
         {...props}
       >
-        {loading ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
-        {loading && loadingText ? loadingText : children}
-      </Comp>
+        {buttonContent(children)}
+      </button>
     );
   },
 );
