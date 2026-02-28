@@ -1,6 +1,6 @@
 'use client';
 
-import { Calendar, MapPin, Send, UserRound } from 'lucide-react';
+import { Calendar, Info, ListChecks, MapPin, Sparkles, Send, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { EventForm, type EventFormValues } from '@/components/events/event-form';
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { authFetch } from '@/lib/auth/client';
-import type { EventDetailResponse, EventInvitation } from '@/lib/types';
+import type { EventDetailResponse, EventInvitation, SchedulingAssistantInsight } from '@/lib/types';
 
 function toApiPayload(values: EventFormValues) {
   return {
@@ -17,6 +17,19 @@ function toApiPayload(values: EventFormValues) {
     startsAt: new Date(values.startsAt).toISOString(),
     endsAt: new Date(values.endsAt).toISOString(),
   };
+}
+
+const TEMPLATE_AGENDA_BULLETS = ['Opening context', 'Core discussion', 'Commitments'];
+
+function isTemplateAiBrief(summary?: string, bullets?: string[]) {
+  const hasTemplateSummary = Boolean(
+    summary && /^AI-ready briefing for .+\.$/i.test(summary.trim()),
+  );
+  const hasTemplateAgenda =
+    bullets?.length === TEMPLATE_AGENDA_BULLETS.length &&
+    bullets.every((bullet, index) => bullet === TEMPLATE_AGENDA_BULLETS[index]);
+
+  return hasTemplateSummary && hasTemplateAgenda;
 }
 
 export function EventDetailClient({ eventId }: { eventId: string }) {
@@ -27,10 +40,17 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rsvpLoading, setRsvpLoading] = useState<string | null>(null);
+  const [aiRefreshLoading, setAiRefreshLoading] = useState(false);
+  const [liveAiInsight, setLiveAiInsight] = useState<SchedulingAssistantInsight | null>(null);
 
   const inviteeEmails = useMemo(
     () => detail?.invitations.map((invitation) => invitation.inviteeEmail) ?? [],
     [detail?.invitations],
+  );
+
+  const hasTemplateBrief = useMemo(
+    () => isTemplateAiBrief(detail?.event.aiSummary, detail?.event.aiAgendaBullets),
+    [detail?.event.aiAgendaBullets, detail?.event.aiSummary],
   );
 
   const loadDetail = useCallback(async () => {
@@ -45,6 +65,7 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
       }
 
       setDetail(payload);
+      setLiveAiInsight(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load this event.');
     } finally {
@@ -68,6 +89,65 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
 
     setEditing(false);
     await loadDetail();
+  }
+
+  async function refreshAiBrief() {
+    if (!detail) {
+      return;
+    }
+
+    setAiRefreshLoading(true);
+    setError(null);
+
+    try {
+      const aiResponse = await authFetch('/api/ai/scheduling-assistant', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: detail.event.title,
+          description: detail.event.description,
+          location: detail.event.location,
+          startsAt: detail.event.startsAt,
+          endsAt: detail.event.endsAt,
+          timezone: detail.event.timezone,
+          inviteeEmails,
+          eventId: detail.event.id,
+        }),
+      });
+
+      const aiPayload = (await aiResponse.json()) as { insight?: SchedulingAssistantInsight; error?: string };
+      if (!aiResponse.ok || !aiPayload.insight) {
+        throw new Error(aiPayload.error ?? 'Unable to generate an AI brief right now.');
+      }
+
+      setLiveAiInsight(aiPayload.insight);
+
+      if (detail.isOrganizer) {
+        const saveResponse = await authFetch(`/api/events/${eventId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            title: detail.event.title,
+            description: detail.event.description,
+            location: detail.event.location,
+            startsAt: detail.event.startsAt,
+            endsAt: detail.event.endsAt,
+            timezone: detail.event.timezone,
+            aiSummary: aiPayload.insight.suggestedSummary ?? aiPayload.insight.summary,
+            aiAgendaBullets: aiPayload.insight.agendaBullets ?? [],
+          }),
+        });
+
+        const savePayload = (await saveResponse.json()) as { error?: string };
+        if (!saveResponse.ok) {
+          throw new Error(savePayload.error ?? 'Generated AI brief but failed to save it.');
+        }
+
+        await loadDetail();
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Unable to refresh the AI brief.');
+    } finally {
+      setAiRefreshLoading(false);
+    }
   }
 
   async function deleteEvent() {
@@ -157,6 +237,14 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
     aiAgendaBullets: detail.event.aiAgendaBullets,
   };
 
+  const displayedSummary =
+    liveAiInsight?.suggestedSummary ??
+    (hasTemplateBrief ? undefined : detail.event.aiSummary);
+  const displayedAgendaBullets =
+    liveAiInsight?.agendaBullets ??
+    (hasTemplateBrief ? undefined : detail.event.aiAgendaBullets);
+  const displayedInsightSummary = liveAiInsight?.summary;
+
   return (
     <div className="space-y-5">
       <Card>
@@ -196,14 +284,104 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
                 RSVP counts
               </div>
               <p className="mt-2 text-xs text-[var(--text-secondary)]">
-                Attending {detail.event.invitationCounts.attending} · Maybe {detail.event.invitationCounts.maybe} · Declined {detail.event.invitationCounts.declined}
+                {`Attending ${detail.event.invitationCounts.attending} | Maybe ${detail.event.invitationCounts.maybe} | Declined ${detail.event.invitationCounts.declined}`}
               </p>
             </div>
           </div>
-          {detail.event.aiSummary ? (
-            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4">
-              <p className="text-sm font-semibold text-[var(--text-primary)]">AI summary</p>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">{detail.event.aiSummary}</p>
+          {displayedSummary || displayedAgendaBullets?.length || hasTemplateBrief ? (
+            <div className="overflow-hidden rounded-[1.5rem] border border-[var(--border-subtle)] bg-[linear-gradient(135deg,rgba(15,118,110,0.09),rgba(255,255,255,0.96),rgba(217,119,6,0.08))] shadow-[var(--shadow-soft)]">
+              <div className="border-b border-[var(--border-subtle)] bg-white/60 px-4 py-3 backdrop-blur sm:px-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)]">
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">AI event brief</p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {liveAiInsight
+                          ? 'Live Gemini-generated planning notes for this event.'
+                          : 'Generated planning notes for this event draft.'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    loading={aiRefreshLoading}
+                    loadingText={detail.isOrganizer ? 'Refreshing and saving...' : 'Generating...'}
+                    onClick={() => void refreshAiBrief()}
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    {detail.isOrganizer ? 'Refresh with Gemini' : 'Generate Gemini brief'}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
+                {displayedSummary ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                      Summary
+                    </p>
+                    <div className="rounded-2xl bg-white/80 p-4">
+                      <p className="text-sm leading-7 text-[var(--text-secondary)]">
+                        {displayedSummary}
+                      </p>
+                    </div>
+                    {displayedInsightSummary ? (
+                      <div className="rounded-2xl border border-[var(--border-subtle)] bg-white/70 p-4">
+                        <div className="flex items-start gap-2">
+                          <Info className="mt-0.5 h-4 w-4 text-[var(--brand-primary)]" />
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                              Schedule insight
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
+                              {displayedInsightSummary}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : hasTemplateBrief ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                      Summary
+                    </p>
+                    <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-white/70 p-4">
+                      <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                        This event still has template demo copy. Generate a live Gemini brief to replace it with a useful summary.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+                {displayedAgendaBullets?.length ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <ListChecks className="h-4 w-4 text-[var(--brand-primary)]" />
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                        Suggested agenda
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-white/80 p-4">
+                      <ul className="space-y-2">
+                        {displayedAgendaBullets.map((bullet, index) => (
+                          <li key={`${bullet}-${index}`} className="flex items-start gap-3">
+                            <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--surface-strong)] text-xs font-semibold text-[var(--text-primary)]">
+                              {index + 1}
+                            </span>
+                            <span className="text-sm leading-6 text-[var(--text-secondary)]">
+                              {bullet}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </CardContent>
@@ -308,7 +486,7 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
             <div key={entry.id} className="rounded-xl border border-[var(--border-subtle)] p-3">
               <p className="text-sm font-medium text-[var(--text-primary)]">{entry.action.replace('_', ' ')}</p>
               <p className="text-xs text-[var(--text-muted)]">
-                {entry.actorName} · {new Date(entry.createdAt).toLocaleString()}
+                {`${entry.actorName} | ${new Date(entry.createdAt).toLocaleString()}`}
               </p>
             </div>
           ))}
