@@ -96,18 +96,49 @@ export function DashboardClient() {
   const [aiInsight, setAiInsight] = useState<DashboardBusinessInsight | null>(null);
   const [aiLoading, setAiLoading] = useState(true);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiRefreshedAt, setAiRefreshedAt] = useState<string | null>(null);
   const [animateIn, setAnimateIn] = useState(false);
   const [activeStatus, setActiveStatus] = useState<ResponseStatus>('attending');
   const [activeDayIndex, setActiveDayIndex] = useState(0);
+
+  const loadOverview = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setAnimateIn(false);
+
+    try {
+      const response = await authFetch(`/api/analytics/overview?ts=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      const payload = (await response.json()) as AnalyticsOverview & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to load dashboard analytics.');
+      }
+
+      setOverview(payload);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to load dashboard analytics.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const loadDashboardInsight = useCallback(async () => {
     setAiLoading(true);
     setAiError(null);
 
     try {
-      const response = await authFetch('/api/ai/dashboard-insight');
+      const response = await authFetch(`/api/ai/dashboard-insight?ts=${Date.now()}`, {
+        cache: 'no-store',
+      });
       const payload = (await response.json()) as {
         insight?: DashboardBusinessInsight;
+        generatedAt?: string;
         error?: string;
       };
 
@@ -116,6 +147,7 @@ export function DashboardClient() {
       }
 
       setAiInsight(payload.insight);
+      setAiRefreshedAt(payload.generatedAt ?? new Date().toISOString());
     } catch (nextError) {
       setAiError(
         nextError instanceof Error
@@ -127,46 +159,13 @@ export function DashboardClient() {
     }
   }, []);
 
+  const refreshDashboardAdvice = useCallback(async () => {
+    await Promise.all([loadOverview(), loadDashboardInsight()]);
+  }, [loadDashboardInsight, loadOverview]);
+
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadOverview() {
-      setLoading(true);
-      setError(null);
-      setAnimateIn(false);
-
-      try {
-        const response = await authFetch('/api/analytics/overview');
-        const payload = (await response.json()) as AnalyticsOverview & { error?: string };
-
-        if (!response.ok) {
-          throw new Error(payload.error ?? 'Unable to load dashboard analytics.');
-        }
-
-        if (!cancelled) {
-          setOverview(payload);
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : 'Unable to load dashboard analytics.',
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
     void loadOverview();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [loadOverview]);
 
   useEffect(() => {
     void loadDashboardInsight();
@@ -260,7 +259,8 @@ export function DashboardClient() {
         insight={aiInsight}
         loading={aiLoading}
         error={aiError}
-        onRefresh={loadDashboardInsight}
+        refreshedAt={aiRefreshedAt}
+        onRefresh={refreshDashboardAdvice}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

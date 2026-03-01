@@ -58,11 +58,13 @@ export function DashboardAiPanel({
   insight,
   loading,
   error,
+  refreshedAt,
   onRefresh,
 }: {
   insight: DashboardBusinessInsight | null;
   loading: boolean;
   error: string | null;
+  refreshedAt: string | null;
   onRefresh: () => Promise<void>;
 }) {
   if (loading && !insight) {
@@ -139,6 +141,12 @@ export function DashboardAiPanel({
               </Button>
             </div>
           </div>
+
+          <p className="text-xs text-[var(--text-muted)]">
+            {refreshedAt
+              ? `Last refreshed ${new Date(refreshedAt).toLocaleTimeString()}`
+              : 'Advice has not been refreshed yet in this session.'}
+          </p>
 
           <div className="grid gap-3 md:grid-cols-3">
             <section className="rounded-[1.25rem] border border-[var(--border-subtle)] bg-white/80 p-4">
