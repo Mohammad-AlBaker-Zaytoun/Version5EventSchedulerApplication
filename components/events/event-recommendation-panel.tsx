@@ -148,7 +148,12 @@ export function EventRecommendationPanel({
                     ) : null}
                   </div>
                   <Button asChild>
-                    <Link href={`/events/${recommendation.eventId}`}>View event</Link>
+                    <Link
+                      href={`/events/${recommendation.eventId}`}
+                      className="text-white hover:text-white"
+                    >
+                      View event
+                    </Link>
                   </Button>
                 </div>
               ) : (
