@@ -148,6 +148,13 @@ export function DashboardAiPanel({
               : 'Advice has not been refreshed yet in this session.'}
           </p>
 
+          {insight.source === 'fallback' ? (
+            <p className="text-xs text-amber-700">
+              Showing rules-based guidance from the current dashboard data because Gemini did not
+              return a usable result for this refresh.
+            </p>
+          ) : null}
+
           <div className="grid gap-3 md:grid-cols-3">
             <section className="rounded-[1.25rem] border border-[var(--border-subtle)] bg-white/80 p-4">
               <div className="flex items-center gap-2">

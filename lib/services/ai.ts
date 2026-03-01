@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 
 import { getServerEnv } from '@/lib/env';
 import {
+  analyticsOverviewSchema,
   dashboardBusinessInsightSchema,
   eventRecommendationInsightSchema,
   schedulingAssistantOutputSchema,
@@ -27,6 +28,45 @@ function getAiClient(): GoogleGenAI {
 
   aiClient = new GoogleGenAI({ apiKey: getServerEnv().GEMINI_API_KEY });
   return aiClient;
+}
+
+function parseAiJson(text?: string | null): unknown | null {
+  if (!text) {
+    return null;
+  }
+
+  const candidates = [
+    text.trim(),
+    text
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim(),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      const firstBrace = candidate.indexOf('{');
+      const lastBrace = candidate.lastIndexOf('}');
+
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        try {
+          return JSON.parse(candidate.slice(firstBrace, lastBrace + 1)) as unknown;
+        } catch {
+          continue;
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 type SchedulingInput = {
@@ -157,7 +197,11 @@ export async function generateSchedulingAssistantInsight(
       return fallback;
     }
 
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = parseAiJson(text);
+    if (!parsed) {
+      return fallback;
+    }
+
     const validated = schedulingAssistantOutputSchema.safeParse(parsed);
     return validated.success ? validated.data : fallback;
   } catch {
@@ -327,16 +371,17 @@ ${JSON.stringify({
   })}`;
 }
 
-export async function generateDashboardBusinessInsight(
-  user: ApiUserContext,
+async function generateDashboardBusinessInsightFromOverview(
+  overview: AnalyticsOverview,
 ): Promise<DashboardBusinessInsight> {
-  const overview = await getAnalyticsOverview(user);
-  const fallback = buildDashboardFallback(overview);
+  const validatedOverview = analyticsOverviewSchema.safeParse(overview);
+  const safeOverview = validatedOverview.success ? validatedOverview.data : overview;
+  const fallback = buildDashboardFallback(safeOverview);
 
   try {
     const response = await getAiClient().models.generateContent({
       model: 'gemini-2.0-flash',
-      contents: buildDashboardPrompt(overview, fallback),
+      contents: buildDashboardPrompt(safeOverview, fallback),
       config: {
         temperature: 0.3,
         topP: 0.8,
@@ -345,11 +390,11 @@ export async function generateDashboardBusinessInsight(
     });
 
     const text = response.text?.trim();
-    if (!text) {
+    const parsed = parseAiJson(text);
+    if (!parsed) {
       return fallback;
     }
 
-    const parsed = JSON.parse(text) as unknown;
     const validated = dashboardBusinessInsightSchema.safeParse(parsed);
 
     if (!validated.success) {
@@ -363,6 +408,14 @@ export async function generateDashboardBusinessInsight(
   } catch {
     return fallback;
   }
+}
+
+export async function generateDashboardBusinessInsight(
+  user: ApiUserContext,
+  overviewInput?: AnalyticsOverview,
+): Promise<DashboardBusinessInsight> {
+  const overview = overviewInput ?? (await getAnalyticsOverview(user));
+  return generateDashboardBusinessInsightFromOverview(overview);
 }
 
 type VisibleEventItem = Awaited<ReturnType<typeof listVisibleEvents>>['items'][number];
@@ -641,7 +694,11 @@ export async function generateEventRecommendationInsight(
       return fallback;
     }
 
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = parseAiJson(text);
+    if (!parsed) {
+      return fallback;
+    }
+
     const validated = eventRecommendationInsightSchema.safeParse(parsed);
 
     if (!validated.success) {

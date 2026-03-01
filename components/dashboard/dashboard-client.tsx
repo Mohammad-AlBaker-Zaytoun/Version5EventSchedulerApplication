@@ -101,41 +101,31 @@ export function DashboardClient() {
   const [activeStatus, setActiveStatus] = useState<ResponseStatus>('attending');
   const [activeDayIndex, setActiveDayIndex] = useState(0);
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setAnimateIn(false);
+  const fetchOverview = useCallback(async (): Promise<AnalyticsOverview> => {
+    const response = await authFetch(`/api/analytics/overview?ts=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    const payload = (await response.json()) as AnalyticsOverview & { error?: string };
 
-    try {
-      const response = await authFetch(`/api/analytics/overview?ts=${Date.now()}`, {
-        cache: 'no-store',
-      });
-      const payload = (await response.json()) as AnalyticsOverview & { error?: string };
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? 'Unable to load dashboard analytics.');
-      }
-
-      setOverview(payload);
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : 'Unable to load dashboard analytics.',
-      );
-    } finally {
-      setLoading(false);
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Unable to load dashboard analytics.');
     }
+
+    return payload;
   }, []);
 
-  const loadDashboardInsight = useCallback(async () => {
-    setAiLoading(true);
-    setAiError(null);
-
-    try {
-      const response = await authFetch(`/api/ai/dashboard-insight?ts=${Date.now()}`, {
-        cache: 'no-store',
-      });
+  const fetchDashboardInsight = useCallback(
+    async (
+      nextOverview?: AnalyticsOverview,
+    ): Promise<{ insight: DashboardBusinessInsight; generatedAt: string }> => {
+      const response = await authFetch(
+        nextOverview ? '/api/ai/dashboard-insight' : `/api/ai/dashboard-insight?ts=${Date.now()}`,
+        {
+          method: nextOverview ? 'POST' : 'GET',
+          cache: 'no-store',
+          body: nextOverview ? JSON.stringify({ overview: nextOverview }) : undefined,
+        },
+      );
       const payload = (await response.json()) as {
         insight?: DashboardBusinessInsight;
         generatedAt?: string;
@@ -146,30 +136,102 @@ export function DashboardClient() {
         throw new Error(payload.error ?? 'Unable to generate dashboard advice right now.');
       }
 
+      return {
+        insight: payload.insight,
+        generatedAt: payload.generatedAt ?? new Date().toISOString(),
+      };
+    },
+    [],
+  );
+
+  const refreshDashboardAdvice = useCallback(async () => {
+    setAiLoading(true);
+    setAiError(null);
+
+    try {
+      const nextOverview = await fetchOverview();
+      setOverview(nextOverview);
+
+      const payload = await fetchDashboardInsight(nextOverview);
       setAiInsight(payload.insight);
-      setAiRefreshedAt(payload.generatedAt ?? new Date().toISOString());
+      setAiRefreshedAt(payload.generatedAt);
     } catch (nextError) {
-      setAiError(
+      const message =
         nextError instanceof Error
           ? nextError.message
-          : 'Unable to generate dashboard advice right now.',
-      );
+          : 'Unable to refresh dashboard advice right now.';
+
+      setAiError(message);
     } finally {
       setAiLoading(false);
     }
-  }, []);
-
-  const refreshDashboardAdvice = useCallback(async () => {
-    await Promise.all([loadOverview(), loadDashboardInsight()]);
-  }, [loadDashboardInsight, loadOverview]);
+  }, [fetchDashboardInsight, fetchOverview]);
 
   useEffect(() => {
-    void loadOverview();
-  }, [loadOverview]);
+    let cancelled = false;
 
-  useEffect(() => {
-    void loadDashboardInsight();
-  }, [loadDashboardInsight]);
+    async function bootstrapDashboard() {
+      setLoading(true);
+      setAiLoading(true);
+      setError(null);
+      setAiError(null);
+      setAnimateIn(false);
+
+      try {
+        const nextOverview = await fetchOverview();
+
+        if (cancelled) {
+          return;
+        }
+
+        setOverview(nextOverview);
+
+        try {
+          const payload = await fetchDashboardInsight(nextOverview);
+
+          if (cancelled) {
+            return;
+          }
+
+          setAiInsight(payload.insight);
+          setAiRefreshedAt(payload.generatedAt);
+        } catch (nextError) {
+          if (cancelled) {
+            return;
+          }
+
+          setAiError(
+            nextError instanceof Error
+              ? nextError.message
+              : 'Unable to generate dashboard advice right now.',
+          );
+        }
+      } catch (nextError) {
+        if (cancelled) {
+          return;
+        }
+
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : 'Unable to load dashboard analytics.',
+        );
+      } finally {
+        if (cancelled) {
+          return;
+        }
+
+        setLoading(false);
+        setAiLoading(false);
+      }
+    }
+
+    void bootstrapDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchDashboardInsight, fetchOverview]);
 
   useEffect(() => {
     if (!overview) {

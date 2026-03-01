@@ -41,6 +41,45 @@ export const dashboardBusinessInsightSchema = z.object({
   recommendations: z.array(z.string().min(3).max(220)).min(2).max(4),
 });
 
+export const analyticsOverviewSchema = z.object({
+  upcomingCount: z.number().int().min(0),
+  ownedCount: z.number().int().min(0),
+  invitedCount: z.number().int().min(0),
+  conflictCount: z.number().int().min(0),
+  responseDistribution: z.array(
+    z.object({
+      status: z.enum(['pending', 'attending', 'maybe', 'declined']),
+      count: z.number().int().min(0),
+    }),
+  ),
+  scheduleDensity: z.array(
+    z.object({
+      label: z.string().min(1).max(40),
+      count: z.number().int().min(0),
+    }),
+  ),
+  highRiskEvents: z.array(
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(1).max(160),
+      startsAt: z.string().datetime(),
+      location: z.string().min(1).max(160),
+      riskLabel: z.string().min(1).max(80),
+    }),
+  ),
+  recentActivity: z.array(
+    z.object({
+      id: z.string().min(1),
+      eventId: z.string().min(1),
+      actorUid: z.string().min(1),
+      actorName: z.string().min(1).max(160),
+      action: z.enum(['created', 'updated', 'invited', 'rsvp_updated', 'deleted']),
+      metadata: z.record(z.string(), z.unknown()),
+      createdAt: z.string().datetime(),
+    }),
+  ),
+});
+
 export const eventRecommendationInsightSchema = z.object({
   headline: z.string().min(8).max(140),
   reason: z.string().min(20).max(500),
