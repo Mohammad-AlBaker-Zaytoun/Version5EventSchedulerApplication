@@ -149,9 +149,9 @@ export function DashboardAiPanel({
           </p>
 
           {insight.source === 'fallback' ? (
-            <p className="text-xs text-amber-700">
-              Showing rules-based guidance from the current dashboard data because Gemini did not
-              return a usable result for this refresh.
+            <p className="text-xs leading-6 text-amber-700">
+              {insight.fallbackMessage ??
+                'Showing rules-based guidance from the current dashboard data because Gemini did not return a usable result for this refresh.'}
             </p>
           ) : null}
 

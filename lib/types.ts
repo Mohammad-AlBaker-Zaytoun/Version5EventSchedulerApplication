@@ -115,6 +115,8 @@ export interface DashboardBusinessInsight {
   risks: string[];
   recommendations: string[];
   source: 'gemini' | 'fallback';
+  fallbackReason?: 'quota_exhausted' | 'invalid_response' | 'api_error';
+  fallbackMessage?: string;
 }
 
 export interface EventRecommendationInsight {

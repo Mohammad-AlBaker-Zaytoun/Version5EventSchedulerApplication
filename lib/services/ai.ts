@@ -392,21 +392,43 @@ async function generateDashboardBusinessInsightFromOverview(
     const text = response.text?.trim();
     const parsed = parseAiJson(text);
     if (!parsed) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned a response, but it was not valid structured data. The dashboard is showing rules-based guidance from the latest analytics snapshot instead.',
+      };
     }
 
     const validated = dashboardBusinessInsightSchema.safeParse(parsed);
 
     if (!validated.success) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned an incomplete dashboard analysis. The dashboard is showing rules-based guidance from the latest analytics snapshot instead.',
+      };
     }
 
     return {
       ...validated.data,
       source: 'gemini',
     };
-  } catch {
-    return fallback;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const quotaExhausted =
+      message.includes('RESOURCE_EXHAUSTED') ||
+      message.includes('Quota exceeded') ||
+      message.includes('429');
+
+    return {
+      ...fallback,
+      fallbackReason: quotaExhausted ? 'quota_exhausted' : 'api_error',
+      fallbackMessage: quotaExhausted
+        ? 'Gemini quota is currently exhausted for this API key, so the dashboard is showing rules-based guidance from the latest analytics snapshot. Add billing, switch to a key with quota, or wait for quota reset before refreshing again.'
+        : 'Gemini is temporarily unavailable, so the dashboard is showing rules-based guidance from the latest analytics snapshot.',
+    };
   }
 }
 
