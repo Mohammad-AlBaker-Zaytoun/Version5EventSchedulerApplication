@@ -121,7 +121,7 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
 
       setLiveAiInsight(aiPayload.insight);
 
-      if (detail.isOrganizer) {
+      if (detail.isOrganizer && aiPayload.insight.source === 'gemini') {
         const saveResponse = await authFetch(`/api/events/${eventId}`, {
           method: 'PATCH',
           body: JSON.stringify({
@@ -238,10 +238,10 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
   };
 
   const displayedSummary =
-    liveAiInsight?.suggestedSummary ??
+    (liveAiInsight?.source === 'gemini' ? liveAiInsight.suggestedSummary : undefined) ??
     (hasTemplateBrief ? undefined : detail.event.aiSummary);
   const displayedAgendaBullets =
-    liveAiInsight?.agendaBullets ??
+    (liveAiInsight?.source === 'gemini' ? liveAiInsight.agendaBullets : undefined) ??
     (hasTemplateBrief ? undefined : detail.event.aiAgendaBullets);
   const displayedInsightSummary = liveAiInsight?.summary;
 
@@ -299,18 +299,23 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
                     <div>
                       <p className="text-sm font-semibold text-[var(--text-primary)]">AI event brief</p>
                       <p className="text-xs text-[var(--text-muted)]">
-                        {liveAiInsight
+                        {liveAiInsight?.source === 'gemini'
                           ? 'Live Gemini-generated planning notes for this event.'
                           : 'Generated planning notes for this event draft.'}
                       </p>
                     </div>
                   </div>
+                  {liveAiInsight ? (
+                    <Badge variant={liveAiInsight.source === 'gemini' ? 'default' : 'outline'}>
+                      {liveAiInsight.source === 'gemini' ? 'Gemini' : 'Fallback'}
+                    </Badge>
+                  ) : null}
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
                     loading={aiRefreshLoading}
-                    loadingText={detail.isOrganizer ? 'Refreshing and saving...' : 'Generating...'}
+                    loadingText={detail.isOrganizer ? 'Refreshing...' : 'Generating...'}
                     onClick={() => void refreshAiBrief()}
                   >
                     <Sparkles className="mr-2 h-4 w-4" />
@@ -340,6 +345,12 @@ export function EventDetailClient({ eventId }: { eventId: string }) {
                             <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
                               {displayedInsightSummary}
                             </p>
+                            {liveAiInsight?.source === 'fallback' ? (
+                              <p className="mt-2 text-xs leading-6 text-amber-700">
+                                {liveAiInsight.fallbackMessage ??
+                                  'Gemini did not return a usable event brief, so the app is showing rules-based scheduling guidance instead.'}
+                              </p>
+                            ) : null}
                           </div>
                         </div>
                       </div>

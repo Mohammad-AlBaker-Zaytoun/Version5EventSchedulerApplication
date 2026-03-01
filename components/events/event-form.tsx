@@ -188,12 +188,16 @@ export function EventForm({
         throw new Error(payload.error ?? 'Unable to analyze this schedule right now.');
       }
 
-      setAiInsight(payload.insight);
-      setValues((current) => ({
-        ...current,
-        aiSummary: payload.insight?.suggestedSummary ?? current.aiSummary,
-        aiAgendaBullets: payload.insight?.agendaBullets ?? current.aiAgendaBullets,
-      }));
+      const insight = payload.insight;
+      setAiInsight(insight);
+
+      if (insight.source === 'gemini') {
+        setValues((current) => ({
+          ...current,
+          aiSummary: insight.suggestedSummary ?? current.aiSummary,
+          aiAgendaBullets: insight.agendaBullets ?? current.aiAgendaBullets,
+        }));
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to analyze this schedule.');
     } finally {
@@ -336,11 +340,22 @@ export function EventForm({
           <div className="space-y-3 rounded-2xl bg-[var(--surface-card)] p-4 shadow-[var(--shadow-soft)]">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-[var(--text-primary)]">AI insight</p>
-              <span className="rounded-full bg-[var(--surface-strong)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                {aiInsight.conflictLevel} conflict risk
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-[var(--surface-strong)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                  {aiInsight.conflictLevel} conflict risk
+                </span>
+                <span className="rounded-full border border-[var(--border-subtle)] bg-white px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                  {aiInsight.source === 'gemini' ? 'Gemini' : 'Fallback'}
+                </span>
+              </div>
             </div>
             <p className="text-sm text-[var(--text-secondary)]">{aiInsight.summary}</p>
+            {aiInsight.source === 'fallback' ? (
+              <p className="text-xs leading-6 text-amber-700">
+                {aiInsight.fallbackMessage ??
+                  'Gemini did not return a usable result, so the app is showing rules-based scheduling guidance instead.'}
+              </p>
+            ) : null}
             {aiInsight.suggestedTimeWindows.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">

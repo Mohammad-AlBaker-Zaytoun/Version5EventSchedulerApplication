@@ -129,6 +129,8 @@ export interface EventRecommendationInsight {
   startsAt?: string;
   location?: string;
   source: 'gemini' | 'fallback';
+  fallbackReason?: 'quota_exhausted' | 'invalid_response' | 'api_error';
+  fallbackMessage?: string;
 }
 
 export interface SchedulingAssistantInsight {
@@ -139,4 +141,7 @@ export interface SchedulingAssistantInsight {
   suggestedTimeWindows: Array<{ startsAt: string; endsAt: string; reason: string }>;
   suggestedSummary?: string;
   agendaBullets?: string[];
+  source: 'gemini' | 'fallback';
+  fallbackReason?: 'quota_exhausted' | 'invalid_response' | 'api_error';
+  fallbackMessage?: string;
 }

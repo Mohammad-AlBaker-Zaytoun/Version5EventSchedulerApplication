@@ -111,6 +111,7 @@ function buildFallbackInsight(
       'Core event discussion',
       'Action items and next steps',
     ],
+    source: 'fallback',
   };
 }
 
@@ -194,18 +195,52 @@ export async function generateSchedulingAssistantInsight(
 
     const text = response.text?.trim();
     if (!text) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned an empty scheduling analysis, so the app is showing rules-based conflict guidance instead.',
+      };
     }
 
     const parsed = parseAiJson(text);
     if (!parsed) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned a non-structured scheduling analysis, so the app is showing rules-based conflict guidance instead.',
+      };
     }
 
     const validated = schedulingAssistantOutputSchema.safeParse(parsed);
-    return validated.success ? validated.data : fallback;
-  } catch {
-    return fallback;
+    if (!validated.success) {
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned an incomplete scheduling analysis, so the app is showing rules-based conflict guidance instead.',
+      };
+    }
+
+    return {
+      ...validated.data,
+      source: 'gemini',
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const quotaExhausted =
+      message.includes('RESOURCE_EXHAUSTED') ||
+      message.includes('Quota exceeded') ||
+      message.includes('429');
+
+    return {
+      ...fallback,
+      fallbackReason: quotaExhausted ? 'quota_exhausted' : 'api_error',
+      fallbackMessage: quotaExhausted
+        ? 'Gemini quota is currently exhausted for this API key, so the app is showing rules-based scheduling guidance instead.'
+        : 'Gemini is temporarily unavailable, so the app is showing rules-based scheduling guidance instead.',
+    };
   }
 }
 
@@ -713,23 +748,43 @@ export async function generateEventRecommendationInsight(
 
     const text = aiResponse.text?.trim();
     if (!text) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned an empty recommendation, so the app is showing a rules-based next-event suggestion instead.',
+      };
     }
 
     const parsed = parseAiJson(text);
     if (!parsed) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned a non-structured recommendation, so the app is showing a rules-based next-event suggestion instead.',
+      };
     }
 
     const validated = eventRecommendationInsightSchema.safeParse(parsed);
 
     if (!validated.success) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini returned an incomplete recommendation, so the app is showing a rules-based next-event suggestion instead.',
+      };
     }
 
     const matchedEvent = visibleEvents.find((event) => event.id === validated.data.eventId);
     if (!matchedEvent) {
-      return fallback;
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_response',
+        fallbackMessage:
+          'Gemini recommended an event outside the current visible schedule, so the app kept the rules-based suggestion instead.',
+      };
     }
 
     return {
@@ -739,7 +794,19 @@ export async function generateEventRecommendationInsight(
       location: matchedEvent.location,
       source: 'gemini',
     };
-  } catch {
-    return fallback;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const quotaExhausted =
+      message.includes('RESOURCE_EXHAUSTED') ||
+      message.includes('Quota exceeded') ||
+      message.includes('429');
+
+    return {
+      ...fallback,
+      fallbackReason: quotaExhausted ? 'quota_exhausted' : 'api_error',
+      fallbackMessage: quotaExhausted
+        ? 'Gemini quota is currently exhausted for this API key, so the app is showing a rules-based next-event recommendation instead.'
+        : 'Gemini is temporarily unavailable, so the app is showing a rules-based next-event recommendation instead.',
+    };
   }
 }

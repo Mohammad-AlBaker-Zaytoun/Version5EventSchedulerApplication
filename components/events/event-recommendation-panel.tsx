@@ -164,6 +164,13 @@ export function EventRecommendationPanel({
             </section>
           </div>
 
+          {recommendation.source === 'fallback' ? (
+            <p className="text-xs leading-6 text-amber-700">
+              {recommendation.fallbackMessage ??
+                'Showing a rules-based next-event recommendation because Gemini did not return a usable result for this refresh.'}
+            </p>
+          ) : null}
+
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
         </div>
       </div>

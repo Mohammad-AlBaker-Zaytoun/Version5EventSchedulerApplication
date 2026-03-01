@@ -84,7 +84,9 @@ export function EventsClient() {
     setRecommendationError(null);
 
     try {
-      const response = await authFetch('/api/ai/event-recommendation');
+      const response = await authFetch(`/api/ai/event-recommendation?ts=${Date.now()}`, {
+        cache: 'no-store',
+      });
       const payload = (await response.json()) as {
         recommendation?: EventRecommendationInsight;
         error?: string;
