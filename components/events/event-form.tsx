@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { authFetch } from '@/lib/auth/client';
+import { cn } from '@/lib/utils';
 import type { SchedulingAssistantInsight } from '@/lib/types';
 
 export type EventFormValues = {
@@ -21,6 +22,8 @@ export type EventFormValues = {
   aiAgendaBullets?: string[];
 };
 
+type FieldErrors = Partial<Record<keyof EventFormValues, string>>;
+
 const emptyValues: EventFormValues = {
   title: '',
   description: '',
@@ -29,6 +32,45 @@ const emptyValues: EventFormValues = {
   endsAt: '',
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
 };
+
+function validateEventForm(values: EventFormValues): FieldErrors {
+  const nextErrors: FieldErrors = {};
+
+  if (values.title.trim().length < 3) {
+    nextErrors.title = 'Use at least 3 characters so the title is clear.';
+  }
+
+  if (values.location.trim().length < 2) {
+    nextErrors.location = 'Add a location or meeting space for attendees.';
+  }
+
+  if (!values.startsAt) {
+    nextErrors.startsAt = 'Choose when this event starts.';
+  }
+
+  if (!values.endsAt) {
+    nextErrors.endsAt = 'Choose when this event ends.';
+  }
+
+  if (values.startsAt && values.endsAt) {
+    const startsAt = new Date(values.startsAt).getTime();
+    const endsAt = new Date(values.endsAt).getTime();
+
+    if (!Number.isNaN(startsAt) && !Number.isNaN(endsAt) && endsAt <= startsAt) {
+      nextErrors.endsAt = 'End time should be later than the start time.';
+    }
+  }
+
+  if (values.timezone.trim().length < 2) {
+    nextErrors.timezone = 'Use a valid timezone like UTC or Europe/Lisbon.';
+  }
+
+  if (values.description.trim().length < 10) {
+    nextErrors.description = 'Add at least 10 characters so attendees know what to expect.';
+  }
+
+  return nextErrors;
+}
 
 export function EventForm({
   initialValues,
@@ -47,6 +89,7 @@ export function EventForm({
     ...emptyValues,
     ...initialValues,
   });
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -59,21 +102,48 @@ export function EventForm({
           values.location &&
           values.startsAt &&
           values.endsAt &&
-          values.description.length >= 10,
+          values.description.trim().length >= 10,
       ),
     [values],
   );
 
   function updateField(field: keyof EventFormValues, nextValue: string) {
-    setValues((current) => ({
-      ...current,
-      [field]: nextValue,
-    }));
+    setValues((current) => {
+      const nextValues = {
+        ...current,
+        [field]: nextValue,
+      };
+
+      if (fieldErrors[field] || field === 'startsAt' || field === 'endsAt') {
+        const nextErrors = validateEventForm(nextValues);
+        setFieldErrors((currentErrors) => ({
+          ...currentErrors,
+          [field]: nextErrors[field],
+          ...(field === 'startsAt' || field === 'endsAt'
+            ? {
+                startsAt: nextErrors.startsAt,
+                endsAt: nextErrors.endsAt,
+              }
+            : {}),
+        }));
+      }
+
+      return nextValues;
+    });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    const nextErrors = validateEventForm(values);
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError('Review the highlighted fields before saving this event.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -81,6 +151,7 @@ export function EventForm({
       if (!initialValues) {
         setValues(emptyValues);
         setAiInsight(null);
+        setFieldErrors({});
       }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to save this event.');
@@ -108,7 +179,11 @@ export function EventForm({
         }),
       });
 
-      const payload = (await response.json()) as { insight?: SchedulingAssistantInsight; error?: string };
+      const payload = (await response.json()) as {
+        insight?: SchedulingAssistantInsight;
+        error?: string;
+      };
+
       if (!response.ok || !payload.insight) {
         throw new Error(payload.error ?? 'Unable to analyze this schedule right now.');
       }
@@ -136,9 +211,15 @@ export function EventForm({
             value={values.title}
             onChange={(event) => updateField('title', event.target.value)}
             placeholder="Quarterly planning workshop"
+            aria-invalid={Boolean(fieldErrors.title)}
+            className={cn(fieldErrors.title ? 'border-red-400 focus-visible:ring-red-500' : '')}
             required
           />
+          {fieldErrors.title ? (
+            <p className="text-xs font-medium text-red-600">{fieldErrors.title}</p>
+          ) : null}
         </div>
+
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="location">Location</Label>
           <Input
@@ -146,9 +227,15 @@ export function EventForm({
             value={values.location}
             onChange={(event) => updateField('location', event.target.value)}
             placeholder="Design studio, Lisbon"
+            aria-invalid={Boolean(fieldErrors.location)}
+            className={cn(fieldErrors.location ? 'border-red-400 focus-visible:ring-red-500' : '')}
             required
           />
+          {fieldErrors.location ? (
+            <p className="text-xs font-medium text-red-600">{fieldErrors.location}</p>
+          ) : null}
         </div>
+
         <div className="space-y-2">
           <Label htmlFor="startsAt">Starts at</Label>
           <Input
@@ -156,9 +243,15 @@ export function EventForm({
             type="datetime-local"
             value={values.startsAt}
             onChange={(event) => updateField('startsAt', event.target.value)}
+            aria-invalid={Boolean(fieldErrors.startsAt)}
+            className={cn(fieldErrors.startsAt ? 'border-red-400 focus-visible:ring-red-500' : '')}
             required
           />
+          {fieldErrors.startsAt ? (
+            <p className="text-xs font-medium text-red-600">{fieldErrors.startsAt}</p>
+          ) : null}
         </div>
+
         <div className="space-y-2">
           <Label htmlFor="endsAt">Ends at</Label>
           <Input
@@ -166,9 +259,15 @@ export function EventForm({
             type="datetime-local"
             value={values.endsAt}
             onChange={(event) => updateField('endsAt', event.target.value)}
+            aria-invalid={Boolean(fieldErrors.endsAt)}
+            className={cn(fieldErrors.endsAt ? 'border-red-400 focus-visible:ring-red-500' : '')}
             required
           />
+          {fieldErrors.endsAt ? (
+            <p className="text-xs font-medium text-red-600">{fieldErrors.endsAt}</p>
+          ) : null}
         </div>
+
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="timezone">Timezone</Label>
           <Input
@@ -176,19 +275,39 @@ export function EventForm({
             value={values.timezone}
             onChange={(event) => updateField('timezone', event.target.value)}
             placeholder="Europe/Lisbon"
+            aria-invalid={Boolean(fieldErrors.timezone)}
+            className={cn(fieldErrors.timezone ? 'border-red-400 focus-visible:ring-red-500' : '')}
             required
           />
+          {fieldErrors.timezone ? (
+            <p className="text-xs font-medium text-red-600">{fieldErrors.timezone}</p>
+          ) : null}
         </div>
+
         <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="description">Description</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="description">Description</Label>
+            <span className="text-xs text-[var(--text-muted)]">
+              {values.description.trim().length}/10 minimum
+            </span>
+          </div>
           <Textarea
             id="description"
             rows={5}
             value={values.description}
             onChange={(event) => updateField('description', event.target.value)}
             placeholder="What is this event about, who is it for, and what should attendees expect?"
+            aria-invalid={Boolean(fieldErrors.description)}
+            className={cn(fieldErrors.description ? 'border-red-400 focus-visible:ring-red-500' : '')}
             required
           />
+          {fieldErrors.description ? (
+            <p className="text-xs font-medium text-red-600">{fieldErrors.description}</p>
+          ) : (
+            <p className="text-xs text-[var(--text-muted)]">
+              A useful summary helps invitees decide faster.
+            </p>
+          )}
         </div>
       </div>
 
@@ -228,7 +347,10 @@ export function EventForm({
                   Suggested time window
                 </p>
                 {aiInsight.suggestedTimeWindows.slice(0, 2).map((window) => (
-                  <div key={`${window.startsAt}-${window.endsAt}`} className="rounded-xl border border-[var(--border-subtle)] p-3">
+                  <div
+                    key={`${window.startsAt}-${window.endsAt}`}
+                    className="rounded-xl border border-[var(--border-subtle)] p-3"
+                  >
                     <p className="text-sm font-medium text-[var(--text-primary)]">
                       {new Date(window.startsAt).toLocaleString()} to{' '}
                       {new Date(window.endsAt).toLocaleString()}
@@ -242,7 +364,11 @@ export function EventForm({
         ) : null}
       </div>
 
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm font-medium text-red-700">{error}</p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
         {onCancel ? (

@@ -1,3 +1,4 @@
+import { ZodError } from 'zod';
 import { NextResponse } from 'next/server';
 
 export class ApiError extends Error {
@@ -25,9 +26,26 @@ export function notFound(message = 'Not found'): never {
   throw new ApiError(message, 404);
 }
 
+function formatZodError(error: ZodError): string {
+  const firstIssue = error.issues[0];
+
+  if (!firstIssue) {
+    return 'Invalid request payload.';
+  }
+
+  const path = firstIssue.path.length > 0 ? firstIssue.path.join('.') : 'request';
+  const label = path.charAt(0).toUpperCase() + path.slice(1);
+
+  return `${label}: ${firstIssue.message}`;
+}
+
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
     return NextResponse.json({ error: error.message }, { status: error.statusCode });
+  }
+
+  if (error instanceof ZodError) {
+    return NextResponse.json({ error: formatZodError(error) }, { status: 400 });
   }
 
   if (error instanceof Error) {
