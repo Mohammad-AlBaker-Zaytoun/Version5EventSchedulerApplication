@@ -64,7 +64,9 @@ export function EventsClient() {
     setError(null);
 
     try {
-      const response = await authFetch(`/api/events${queryString ? `?${queryString}` : ''}`);
+      const response = await authFetch(`/api/events${queryString ? `?${queryString}` : ''}`, {
+        cache: 'no-store',
+      });
       const payload = (await response.json()) as EventListResponse & { error?: string };
 
       if (!response.ok) {
@@ -240,10 +242,19 @@ export function EventsClient() {
             </Card>
           ))}
         </div>
-      ) : (
+      ) : response?.items.length ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {response?.items.map((event) => <EventCard key={event.id} event={event} />)}
+          {response.items.map((event) => <EventCard key={event.id} event={event} />)}
         </div>
+      ) : (
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-sm text-[var(--text-secondary)]">
+              No visible events match the current filters. Adjust the search, widen the date range,
+              or create a new event.
+            </p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

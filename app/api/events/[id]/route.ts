@@ -6,6 +6,8 @@ import { parseJsonBody } from '@/lib/api/request';
 import { eventInputSchema } from '@/lib/schemas/event';
 import { deleteEvent, getEventDetail, updateEvent } from '@/lib/services/events';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -14,7 +16,11 @@ export async function GET(
     const user = await requireApiUser(request);
     const { id } = await context.params;
     const detail = await getEventDetail(user, id);
-    return NextResponse.json(detail);
+    return NextResponse.json(detail, {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
   } catch (error) {
     return handleApiError(error);
   }

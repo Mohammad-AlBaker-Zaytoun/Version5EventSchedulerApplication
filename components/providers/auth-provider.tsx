@@ -114,6 +114,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     try {
       const credential = await signInWithPopup(auth, googleProvider);
       const syncedProfile = await syncSessionAndProfile(credential.user);
+      if (!syncedProfile) {
+        await signOut(auth);
+        throw new Error(
+          'Unable to complete sign-in. Check your Firebase session configuration and try again.',
+        );
+      }
+
       setUser(credential.user);
       setProfile(syncedProfile);
 

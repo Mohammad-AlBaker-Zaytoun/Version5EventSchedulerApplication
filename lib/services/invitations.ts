@@ -73,6 +73,13 @@ export async function createInvitations(
     badRequest('At least one valid email is required.');
   }
 
+  const organizerEmail = normalizeEmail(user.email);
+  const inviteableEmails = cleanedEmails.filter((email) => email !== organizerEmail);
+
+  if (inviteableEmails.length === 0) {
+    badRequest('Remove your own email. Organizers already have access to this event.');
+  }
+
   const existingSnapshot = await getAdminDb()
     .collection(INVITATIONS_COLLECTION)
     .where('eventId', '==', eventId)
@@ -87,7 +94,7 @@ export async function createInvitations(
   const created: EventInvitation[] = [];
   let nextCounts: EventInvitationCounts = { ...event.invitationCounts };
 
-  for (const email of cleanedEmails) {
+  for (const email of inviteableEmails) {
     if (existingEmails.has(email)) {
       continue;
     }
@@ -101,7 +108,7 @@ export async function createInvitations(
   }
 
   if (created.length === 0) {
-    return [];
+    badRequest('No new invitations were sent. Those attendees were already invited.');
   }
 
   batch.set(

@@ -1,4 +1,4 @@
-import { format, isAfter, isBefore, isEqual, parseISO } from 'date-fns';
+import { format, isAfter, isBefore, parseISO } from 'date-fns';
 
 import type { EventInvitationCounts, EventRecord, RsvpStatus } from '@/lib/types';
 
@@ -68,10 +68,7 @@ export function hasOverlap(
   const candidateStart = parseISO(candidate.startsAt);
   const candidateEnd = parseISO(candidate.endsAt);
 
-  return (
-    (isBefore(targetStart, candidateEnd) || isEqual(targetStart, candidateEnd)) &&
-    (isAfter(targetEnd, candidateStart) || isEqual(targetEnd, candidateStart))
-  );
+  return isBefore(targetStart, candidateEnd) && isAfter(targetEnd, candidateStart);
 }
 
 export function sortEventsByStart<T extends Pick<EventRecord, 'startsAt'>>(events: T[]): T[] {

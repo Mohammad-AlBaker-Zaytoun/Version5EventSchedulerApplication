@@ -1,6 +1,7 @@
 'use client';
 
 import { CalendarCheck2, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +9,21 @@ import { useAuth } from '@/components/providers/auth-provider';
 
 export function LoginCard() {
   const { signInWithGoogle, loading } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSignIn() {
+    setError(null);
+
+    try {
+      await signInWithGoogle();
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to complete Google sign-in right now.',
+      );
+    }
+  }
 
   return (
     <Card className="group mx-auto max-w-md">
@@ -23,12 +39,13 @@ export function LoginCard() {
       <CardContent className="space-y-3">
         <Button
           className="w-full"
-          onClick={() => void signInWithGoogle()}
+          onClick={() => void handleSignIn()}
           loading={loading}
           loadingText="Signing in..."
         >
           Continue with Google
         </Button>
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <p className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
           <Sparkles className="h-3.5 w-3.5" />
           Pending invitations sent to your email will attach automatically after sign-in.

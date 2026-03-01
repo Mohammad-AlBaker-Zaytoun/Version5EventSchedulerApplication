@@ -6,12 +6,18 @@ import { parseJsonBody } from '@/lib/api/request';
 import { eventInputSchema, eventQuerySchema } from '@/lib/schemas/event';
 import { createEvent, listVisibleEvents } from '@/lib/services/events';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const user = await requireApiUser(request);
     const parsed = eventQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams.entries()));
     const result = await listVisibleEvents(user, parsed);
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
   } catch (error) {
     return handleApiError(error);
   }

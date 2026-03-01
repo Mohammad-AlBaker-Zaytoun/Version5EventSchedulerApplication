@@ -15,8 +15,12 @@ export function InvitationsClient() {
   useEffect(() => {
     void (async () => {
       setLoading(true);
+      setError(null);
+
       try {
-        const response = await authFetch('/api/invitations');
+        const response = await authFetch('/api/invitations', {
+          cache: 'no-store',
+        });
         const payload = (await response.json()) as { items?: EventInvitation[]; error?: string };
         if (!response.ok || !payload.items) {
           throw new Error(payload.error ?? 'Unable to load invitations.');
@@ -42,25 +46,48 @@ export function InvitationsClient() {
         {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="h-20 animate-pulse rounded-2xl bg-[var(--surface-muted)]" />
+              <div
+                key={index}
+                className="h-20 animate-pulse rounded-2xl bg-[var(--surface-muted)]"
+              />
             ))}
           </div>
-        ) : (
+        ) : invitations.length > 0 ? (
           invitations.map((invitation) => (
-            <div key={invitation.id} className="rounded-2xl border border-[var(--border-subtle)] p-4">
+            <div
+              key={invitation.id}
+              className="rounded-2xl border border-[var(--border-subtle)] p-4"
+            >
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">{invitation.eventTitle}</p>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">
+                    {invitation.eventTitle}
+                  </p>
                   <p className="text-xs text-[var(--text-muted)]">
-                    {new Date(invitation.eventStartsAt).toLocaleString()} · {invitation.timezone}
+                    {new Date(invitation.eventStartsAt).toLocaleString()} | {invitation.timezone}
                   </p>
                 </div>
-                <Badge variant={invitation.rsvpStatus === 'declined' ? 'destructive' : invitation.rsvpStatus === 'attending' ? 'default' : 'secondary'}>
+                <Badge
+                  variant={
+                    invitation.rsvpStatus === 'declined'
+                      ? 'destructive'
+                      : invitation.rsvpStatus === 'attending'
+                        ? 'default'
+                        : 'secondary'
+                  }
+                >
                   {invitation.rsvpStatus}
                 </Badge>
               </div>
             </div>
           ))
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--surface-card)] p-4">
+            <p className="text-sm text-[var(--text-secondary)]">
+              No invitations are linked to this account yet. New invites will appear here after
+              they are sent to your email.
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>

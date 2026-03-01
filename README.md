@@ -136,6 +136,8 @@ Public pages:
 - `GET /api/invitations`
 - `PATCH /api/invitations/:id/rsvp`
 - `GET /api/analytics/overview`
+- `GET /api/ai/dashboard-insight`
+- `GET /api/ai/event-recommendation`
 - `POST /api/ai/scheduling-assistant`
 - `POST /api/auth/session`
 - `DELETE /api/auth/session`

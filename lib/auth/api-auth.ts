@@ -94,9 +94,14 @@ export async function getSessionUser(): Promise<ApiUserContext | null> {
     return null;
   }
 
-  const profile = await getUserProfile(decoded.uid);
+  let profile = await getUserProfile(decoded.uid);
   if (!profile) {
-    return null;
+    profile = await upsertUserProfile({
+      uid: decoded.uid,
+      email: decoded.email ?? '',
+      displayName: decoded.name ?? 'Attendee',
+      photoURL: decoded.picture,
+    });
   }
 
   return {
