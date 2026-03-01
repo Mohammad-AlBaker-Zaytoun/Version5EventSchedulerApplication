@@ -2,7 +2,7 @@
 
 Mobile-first event scheduler built with Next.js App Router, Firebase Auth/Firestore, and Gemini AI.
 
-Live URL: `TODO_ADD_VERCEL_URL`
+Live URL: `https://version5-event-scheduler-applicatio.vercel.app`
 
 ## Highlights
 
@@ -211,7 +211,7 @@ pnpm build
 
 1. Import the repository in Vercel.
 2. Add all env vars from `.env.example`.
-3. Set `NEXT_PUBLIC_APP_URL` to your deployed domain.
+3. Set `NEXT_PUBLIC_APP_URL` to `https://version5-event-scheduler-applicatio.vercel.app`.
 4. Add the Vercel domain to Firebase Auth authorized domains.
 5. Deploy and verify:
    - `/login`
